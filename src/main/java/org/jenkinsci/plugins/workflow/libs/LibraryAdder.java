@@ -31,24 +31,6 @@ import hudson.FilePath;
 import hudson.model.Queue;
 import hudson.model.Run;
 import hudson.model.TaskListener;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
 import org.apache.commons.io.IOUtils;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowExecution;
 import org.jenkinsci.plugins.workflow.cps.GlobalVariable;
@@ -58,16 +40,28 @@ import org.jenkinsci.plugins.workflow.cps.replay.OriginalLoadedScripts;
 import org.jenkinsci.plugins.workflow.cps.replay.ReplayAction;
 import org.jenkinsci.plugins.workflow.flow.FlowCopier;
 
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
+import java.util.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 /**
  * Given {@link LibraryResolver}, actually adds to the Groovy classpath.
  */
-@Extension public class LibraryAdder extends ClasspathAdder {
+@Extension
+public class LibraryAdder extends ClasspathAdder {
 
     private static final Logger LOGGER = Logger.getLogger(LibraryAdder.class.getName());
 
-    @Override public List<Addition> add(CpsFlowExecution execution, List<String> libraries, HashMap<String, Boolean> changelogs) throws Exception {
+    @Override
+    public List<Addition> add(CpsFlowExecution execution, List<String> libraries, HashMap<String, Boolean> changelogs) throws Exception {
         Queue.Executable executable = execution.getOwner().getExecutable();
-        Run<?,?> build;
+        Run<?, ?> build;
         if (executable instanceof Run) {
             build = (Run) executable;
         } else {
@@ -75,9 +69,9 @@ import org.jenkinsci.plugins.workflow.flow.FlowCopier;
             return Collections.emptyList();
         }
         // First parse the library declarations (if any) looking for requested versions.
-        Map<String,String> libraryVersions = new HashMap<>();
-        Map<String,Boolean> libraryChangelogs = new HashMap<>();
-        Map<String,String> librariesUnparsed = new HashMap<>();
+        Map<String, String> libraryVersions = new HashMap<>();
+        Map<String, Boolean> libraryChangelogs = new HashMap<>();
+        Map<String, String> librariesUnparsed = new HashMap<>();
         for (String library : libraries) {
             String[] parsed = parse(library);
             libraryVersions.put(parsed[0], parsed[1]);
@@ -90,7 +84,7 @@ import org.jenkinsci.plugins.workflow.flow.FlowCopier;
             // Resuming a build, so just look up what we loaded before.
             for (LibraryRecord record : action.getLibraries()) {
                 FilePath libDir = new FilePath(execution.getOwner().getRootDir()).child("libs/" + record.name);
-                for (String root : new String[] {"src", "vars"}) {
+                for (String root : new String[]{"src", "vars"}) {
                     FilePath dir = libDir.child(root);
                     if (dir.isDirectory()) {
                         additions.add(new Addition(dir.toURI().toURL(), record.trusted));
@@ -104,8 +98,8 @@ import org.jenkinsci.plugins.workflow.flow.FlowCopier;
             return additions;
         }
         // Now we will see which libraries we want to load for this job.
-        Map<String,LibraryRecord> librariesAdded = new LinkedHashMap<>();
-        Map<String,LibraryRetriever> retrievers = new HashMap<>();
+        Map<String, LibraryRecord> librariesAdded = new LinkedHashMap<>();
+        Map<String, LibraryRetriever> retrievers = new HashMap<>();
         TaskListener listener = execution.getOwner().getListener();
         for (LibraryResolver kind : ExtensionList.lookup(LibraryResolver.class)) {
             boolean kindTrusted = kind.isTrusted();
@@ -142,23 +136,26 @@ import org.jenkinsci.plugins.workflow.flow.FlowCopier;
         return additions;
     }
 
-    static @Nonnull String[] parse(@Nonnull String identifier) {
-       int at = identifier.indexOf('@');
+    static @Nonnull
+    String[] parse(@Nonnull String identifier) {
+        int at = identifier.indexOf('@');
         if (at == -1) {
-            return new String[] {identifier, null}; // pick up defaultVersion
+            return new String[]{identifier, null}; // pick up defaultVersion
         } else {
-            return new String[] {identifier.substring(0, at), identifier.substring(at + 1)};
+            return new String[]{identifier.substring(0, at), identifier.substring(at + 1)};
         }
     }
 
-    /** Retrieve library files. */
-    static List<URL> retrieve(@Nonnull String name, @Nonnull String version, @Nonnull LibraryRetriever retriever, boolean trusted, Boolean changelog, @Nonnull TaskListener listener, @Nonnull Run<?,?> run, @Nonnull CpsFlowExecution execution, @Nonnull Set<String> variables) throws Exception {
+    /**
+     * Retrieve library files.
+     */
+    static List<URL> retrieve(@Nonnull String name, @Nonnull String version, @Nonnull LibraryRetriever retriever, boolean trusted, Boolean changelog, @Nonnull TaskListener listener, @Nonnull Run<?, ?> run, @Nonnull CpsFlowExecution execution, @Nonnull Set<String> variables) throws Exception {
         FilePath libDir = new FilePath(execution.getOwner().getRootDir()).child("libs/" + name);
         retriever.retrieve(name, version, changelog, libDir, run, listener);
         // Replace any classes requested for replay:
         if (!trusted) {
             for (String clazz : ReplayAction.replacementsIn(execution)) {
-                for (String root : new String[] {"src", "vars"}) {
+                for (String root : new String[]{"src", "vars"}) {
                     String rel = root + "/" + clazz.replace('.', '/') + ".groovy";
                     FilePath f = libDir.child(rel);
                     if (f.exists()) {
@@ -179,9 +176,9 @@ import org.jenkinsci.plugins.workflow.flow.FlowCopier;
         FilePath varsDir = libDir.child("vars");
         if (varsDir.isDirectory()) {
             urls.add(varsDir.toURI().toURL());
-            for (FilePath var : varsDir.list("*.groovy")) {
-                variables.add(var.getBaseName());
-            }
+            Object[] childVars = findVarsInFolder(varsDir);
+            urls.addAll((ArrayList<URL>) childVars[0]);
+            variables.addAll((Set<String>) childVars[1]);
         }
         if (urls.isEmpty()) {
             throw new AbortException("Library " + name + " expected to contain at least one of src or vars directories");
@@ -189,17 +186,35 @@ import org.jenkinsci.plugins.workflow.flow.FlowCopier;
         return urls;
     }
 
+    static public Object[] findVarsInFolder(FilePath directory) throws Exception {
+        Set<String> list = new HashSet<>();
+        List<URL> urls = new ArrayList<>();
+        for (FilePath var : directory.list()) {
+            if (var.isDirectory()) {
+                urls.add(var.toURI().toURL());
+                Object[] childVars = findVarsInFolder(var);
+                urls.addAll((ArrayList<URL>) childVars[0]);
+                list.addAll((Set<String>) childVars[1]);
+            } else if (var.getName().endsWith(".groovy")) {
+                list.add(var.getBaseName());
+            }
+        }
+        return new Object[]{urls, list};
+    }
+
     /**
      * Loads resources for {@link ResourceStep}.
+     *
      * @param execution a build
-     * @param name a resource name, à la {@link Class#getResource(String)} but with no leading {@code /} allowed
+     * @param name      a resource name, à la {@link Class#getResource(String)} but with no leading {@code /} allowed
      * @return a map from {@link LibraryRecord#name} to file contents
      */
-    static @Nonnull Map<String,String> findResources(@Nonnull CpsFlowExecution execution, @Nonnull String name, @CheckForNull String encoding) throws IOException, InterruptedException {
-        Map<String,String> resources = new TreeMap<>();
+    static @Nonnull
+    Map<String, String> findResources(@Nonnull CpsFlowExecution execution, @Nonnull String name, @CheckForNull String encoding) throws IOException, InterruptedException {
+        Map<String, String> resources = new TreeMap<>();
         Queue.Executable executable = execution.getOwner().getExecutable();
         if (executable instanceof Run) {
-            Run<?,?> run = (Run) executable;
+            Run<?, ?> run = (Run) executable;
             LibrariesAction action = run.getAction(LibrariesAction.class);
             if (action != null) {
                 FilePath libs = new FilePath(run.getRootDir()).child("libs");
@@ -224,9 +239,11 @@ import org.jenkinsci.plugins.workflow.flow.FlowCopier;
         }
     }
 
-    @Extension public static class GlobalVars extends GlobalVariableSet {
+    @Extension
+    public static class GlobalVars extends GlobalVariableSet {
 
-        @Override public Collection<GlobalVariable> forRun(Run<?,?> run) {
+        @Override
+        public Collection<GlobalVariable> forRun(Run<?, ?> run) {
             if (run == null) {
                 return Collections.emptySet();
             }
@@ -247,14 +264,16 @@ import org.jenkinsci.plugins.workflow.flow.FlowCopier;
 
     }
 
-    @Extension public static class LoadedLibraries extends OriginalLoadedScripts {
+    @Extension
+    public static class LoadedLibraries extends OriginalLoadedScripts {
 
-        @Override public Map<String,String> loadScripts(CpsFlowExecution execution) {
-            Map<String,String> scripts = new HashMap<>();
+        @Override
+        public Map<String, String> loadScripts(CpsFlowExecution execution) {
+            Map<String, String> scripts = new HashMap<>();
             try {
                 Queue.Executable executable = execution.getOwner().getExecutable();
                 if (executable instanceof Run) {
-                    Run<?,?> run = (Run) executable;
+                    Run<?, ?> run = (Run) executable;
                     LibrariesAction action = run.getAction(LibrariesAction.class);
                     if (action != null) {
                         FilePath libs = new FilePath(run.getRootDir()).child("libs");
@@ -262,7 +281,7 @@ import org.jenkinsci.plugins.workflow.flow.FlowCopier;
                             if (library.trusted) {
                                 continue; // TODO JENKINS-41157 allow replay of trusted libraries if you have RUN_SCRIPTS
                             }
-                            for (String rootName : new String[] {"src", "vars"}) {
+                            for (String rootName : new String[]{"src", "vars"}) {
                                 FilePath root = libs.child(library.name + "/" + rootName);
                                 if (!root.isDirectory()) {
                                     continue;
@@ -283,9 +302,11 @@ import org.jenkinsci.plugins.workflow.flow.FlowCopier;
 
     }
 
-    @Extension public static class Copier extends FlowCopier.ByRun {
+    @Extension
+    public static class Copier extends FlowCopier.ByRun {
 
-        @Override public void copy(Run<?,?> original, Run<?,?> copy, TaskListener listener) throws IOException, InterruptedException {
+        @Override
+        public void copy(Run<?, ?> original, Run<?, ?> copy, TaskListener listener) throws IOException, InterruptedException {
             LibrariesAction action = original.getAction(LibrariesAction.class);
             if (action != null) {
                 copy.addAction(new LibrariesAction(action.getLibraries()));
